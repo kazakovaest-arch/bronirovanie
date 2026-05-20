@@ -1232,6 +1232,39 @@ async function fetchAllFromServer() {
 }
 
 // Тихая периодическая синхронизация (каждые 5 секунд)
+// Считаем "отпечаток" данных — короткую сигнатуру, по которой видим что изменилось.
+// Берём только то, что влияет на отображение: id, статус, время, столы.
+function computeDataFingerprint() {
+  const bookings = STATE.bookings || [];
+  // Сортируем чтобы отпечаток был стабильным
+  const items = bookings.map(b => [
+    b.id, b.status, b.date, b.time, b.duration,
+    (b.tables || []).join(','), b.name, b.guests,
+    b.updatedAt || ''
+  ].join('|'));
+  items.sort();
+  return items.length + '#' + items.join('§');
+}
+
+let lastDataFingerprint = '';
+
+// Проверяем — заняты ли в данный момент формы (тогда render() сломал бы то что юзер вводит)
+function isUserActiveInForms() {
+  const modals = ['modal-overlay', 'walkin-overlay', 'settings-overlay', 'api-config-overlay'];
+  for (const id of modals) {
+    const m = document.getElementById(id);
+    if (m && m.classList.contains('active')) return true;
+  }
+  // Также — если кто-то набирает что-то в любом поле
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+    return true;
+  }
+  // И если режим редактирования схемы открыт
+  if (STATE.editingSchema) return true;
+  return false;
+}
+
 async function periodicSync() {
   if (!API.enabled) return;
   // Пауза синхронизации, если пользователь неактивен > 10 минут
@@ -1248,7 +1281,19 @@ async function periodicSync() {
     applyServerData(data);
     API.lastSyncAt = new Date();
     API.setConnState('connected');
-    if (typeof render === 'function') render();
+    // Перерисовываем ТОЛЬКО если:
+    //  1) Данные реально изменились
+    //  2) Юзер не работает в этот момент в форме (иначе сломаем ввод)
+    if (typeof render === 'function') {
+      const fp = computeDataFingerprint();
+      if (fp !== lastDataFingerprint && !isUserActiveInForms()) {
+        lastDataFingerprint = fp;
+        render();
+      } else if (fp !== lastDataFingerprint) {
+        // Данные новые, но юзер занят — отложим до следующего тика
+        lastDataFingerprint = fp;
+      }
+    }
   } catch (e) {
     API.setConnState('error', String(e.message || e));
   } finally {
@@ -3330,8 +3375,22 @@ document.getElementById('api-save-btn').addEventListener('click', async () => {
   }
 });
 
-// Клик по индикатору соединения — открыть настройки или принудительно синхронизировать
+// Клик по индикатору соединения — открыть настройки или принудительно синхронизировать.
+// 5 быстрых кликов подряд — открыть диагностическое меню
+let connClickCount = 0;
+let connClickTimer = null;
+
 document.getElementById('conn-indicator').addEventListener('click', () => {
+  connClickCount++;
+  clearTimeout(connClickTimer);
+  connClickTimer = setTimeout(() => { connClickCount = 0; }, 1500);
+
+  if (connClickCount >= 5) {
+    connClickCount = 0;
+    openDiagnostics();
+    return;
+  }
+
   if (!API.enabled) {
     openApiConfig(true);
     return;
@@ -3344,6 +3403,44 @@ document.getElementById('conn-indicator').addEventListener('click', () => {
     openApiConfig(true);
   }
 });
+
+function openDiagnostics() {
+  const bookings = STATE.bookings || [];
+  const byRest = {};
+  bookings.forEach(b => {
+    const r = b.restaurant || '?';
+    byRest[r] = (byRest[r] || 0) + 1;
+  });
+  const walkins = bookings.filter(b => b.isWalkin);
+  const pending = API.pendingQueue || [];
+  const lastSync = API.lastSyncAt ? new Date(API.lastSyncAt).toLocaleTimeString() : 'никогда';
+
+  const info = [
+    '=== ДИАГНОСТИКА ===',
+    '',
+    'Состояние подключения: ' + API.lastConnState,
+    'Последняя синхронизация: ' + lastSync,
+    'Ошибка последняя: ' + (API.lastError || 'нет'),
+    '',
+    '--- Данные ---',
+    'Всего записей: ' + bookings.length,
+    'Свободных посадок: ' + walkins.length,
+    'По ресторанам: ' + JSON.stringify(byRest),
+    '',
+    '--- Очередь оффлайн ---',
+    'Не отправлено на сервер: ' + pending.length,
+    pending.length > 0 ? 'Последние операции:\n' + pending.slice(-3).map(p => '  - ' + (p.op?.action || '?') + ' (' + new Date(p.at).toLocaleTimeString() + ')').join('\n') : '',
+    '',
+    '--- Браузер ---',
+    'User-Agent: ' + navigator.userAgent.substring(0, 80),
+    '',
+    'Скопируй это и пришли разработчику для диагностики.',
+  ].join('\n');
+
+  // Создаём текстовое окно для копирования
+  const w = window.open('', 'diagnostics', 'width=600,height=500');
+  w.document.write('<html><head><title>Диагностика</title></head><body><pre style="font-family: monospace; padding: 20px; white-space: pre-wrap;">' + info.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre></body></html>');
+}
 
 // Отслеживаем активность пользователя для паузы синхронизации в idle
 ['click', 'keydown', 'mousemove'].forEach(ev => {
