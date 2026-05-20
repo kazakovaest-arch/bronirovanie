@@ -1597,6 +1597,21 @@ function renderFloorPlan() {
   plan.className = 'floor-plan layout-' + (rest.layout || '1zone');
   plan.innerHTML = '';
 
+  // Если не подключено к Google Sheets — показываем большую кнопку подключения
+  if (!API.enabled) {
+    plan.innerHTML = '';
+    plan.className = '';
+    plan.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px;';
+    plan.innerHTML =
+      '<div style="text-align:center;color:var(--ink-soft);">' +
+        '<div style="font-size:48px;margin-bottom:12px;">🔌</div>' +
+        '<div style="font-family:Fraunces,serif;font-size:22px;font-weight:600;color:var(--ink);margin-bottom:8px;">Нет подключения к базе данных</div>' +
+        '<div style="font-size:14px;margin-bottom:24px;">Введи URL и пароль от Google Sheets чтобы загрузить схему и брони</div>' +
+        '<button onclick="openApiConfig(true)" style="padding:12px 28px;background:var(--accent);color:white;border:none;border-radius:10px;font-family:Manrope,sans-serif;font-size:15px;font-weight:600;cursor:pointer;">Подключить Google Sheets</button>' +
+      '</div>';
+    return;
+  }
+
   const dayBookings = bookingsFor(STATE.currentDate, STATE.currentRestaurant);
   const showCap = STATE.config.showCapacity;
   const editing = STATE.editingSchema;
