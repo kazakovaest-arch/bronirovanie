@@ -3208,41 +3208,8 @@ document.getElementById('toggle-show-cap').addEventListener('change', e => {
   render();
 });
 
-document.getElementById('seed-demo').addEventListener('click', () => {
-  if (API.enabled) {
-    showToast('Демо нельзя загружать когда подключена облачная база — есть риск засорить реальные данные', 'error');
-    return;
-  }
-  if (STATE.bookings.length > 0 && !confirm('Уже есть данные. Добавить демо-брони сверху?')) return;
-  loadDemoData();
-  saveStorage();
-  render();
-  showToast('Демо-данные загружены', 'success');
-});
-document.getElementById('clear-data').addEventListener('click', () => {
-  if (API.enabled) {
-    if (!confirm('Это очистит только ЛОКАЛЬНЫЙ КЭШ браузера и отключит подключение к Google Sheets. Данные на сервере останутся. Продолжить?')) return;
-    API.clearConfig();
-    if (API.syncIntervalId) clearInterval(API.syncIntervalId);
-    API.syncIntervalId = null;
-    STATE.bookings = [];
-    STATE.config = deepClone(DEFAULT_CONFIG);
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem('reservation-app-pending');
-    populateSelects();
-    render();
-    updateConnIndicator();
-    showToast('Локальный кэш очищен. Данные на сервере не тронуты.', 'success');
-    setTimeout(() => openApiConfig(false), 600);
-    return;
-  }
-  if (!confirm('Удалить ВСЕ записи и сбросить настройки? Это нельзя отменить.')) return;
-  STATE.bookings = [];
-  STATE.config = deepClone(DEFAULT_CONFIG);
-  saveStorage();
-  render();
-  showToast('Все данные удалены', 'success');
-});
+// seed-demo удалён из интерфейса
+// clear-data удалён из интерфейса
 
 // Esc
 document.addEventListener('keydown', e => {
