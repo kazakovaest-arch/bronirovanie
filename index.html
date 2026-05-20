@@ -63,8 +63,7 @@
   .conn-indicator.error .conn-dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-  .connection-banner { background: linear-gradient(135deg, var(--gold) 0%, #a37f54 100%); color: white; padding: 8px 16px; text-align: center; font-size: 12px; }
-  .connection-banner a { color: white; text-decoration: underline; font-weight: 600; margin-left: 8px; cursor: pointer; }
+
 
   .edit-toolbar { background: var(--gold); color: white; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .edit-toolbar .info { font-size: 13px; font-weight: 600; }
@@ -399,11 +398,7 @@
     </div>
   </div>
 
-  <div class="connection-banner">
-    Прототип. Брони сохраняются в этом браузере.
-    <a id="seed-demo">Загрузить демо-данные →</a>
-    <a id="clear-data" style="margin-left: 16px;">Очистить всё</a>
-  </div>
+
 
   <div class="edit-toolbar" id="edit-toolbar" style="display:none;">
     <div class="info">
@@ -416,6 +411,8 @@
       <button class="primary" id="btn-edit-save">Готово</button>
     </div>
   </div>
+
+  <div style="height: 6px; background: linear-gradient(135deg, var(--gold) 0%, #a37f54 100%);"></div>
 
   <div class="main">
 
