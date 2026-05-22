@@ -1465,6 +1465,12 @@ function endTime(start, durationHours) {
   return minutesToTime(timeToMinutes(start) + Math.round(durationHours * 60));
 }
 
+// Считает вместимость зоны как сумму мест всех её столов (автоподсчёт)
+function zoneCapacity(zone) {
+  if (!zone || !zone.tables) return 0;
+  return zone.tables.reduce((sum, t) => sum + (parseInt(t.cap) || 0), 0);
+}
+
 function bookingsFor(date, restaurant) {
   return STATE.bookings.filter(b => b.date === date && b.restaurant === restaurant);
 }
@@ -1660,7 +1666,7 @@ function renderFloorPlan() {
     } else {
       header.innerHTML = `
         <div class="zone-name">${escapeHtml(zone.name)}</div>
-        <div class="zone-stats">${occupied.size}/${zone.tables.length} занято · до ${zone.capacity} чел.</div>
+        <div class="zone-stats">${occupied.size}/${zone.tables.length} занято · до ${zoneCapacity(zone)} чел.</div>
       `;
     }
     zEl.appendChild(header);
@@ -1927,7 +1933,7 @@ function renderStats() {
     .filter(b => !['cancelled', 'noshow'].includes(b.status));
   const dayBookings = dayAll.filter(b => !b.isWalkin);
   const dayWalkins = dayAll.filter(b => b.isWalkin);
-  const totalCap = rest.zones.reduce((s, z) => s + z.capacity, 0);
+  const totalCap = rest.zones.reduce((s, z) => s + zoneCapacity(z), 0);
   const totalGuests = dayAll.reduce((s, b) => s + (parseInt(b.guests) || 0), 0);
 
   document.getElementById('stat-bookings').textContent = dayBookings.length;
@@ -3067,7 +3073,7 @@ document.getElementById('btn-book-zone').addEventListener('click', () => {
     <div style="padding:14px;background:white;border-radius:10px;border:1px solid var(--line);cursor:pointer;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;" data-zone-pick="${z.id}">
       <div>
         <div style="font-family:'Fraunces',serif;font-size:16px;font-weight:600;">${escapeHtml(z.name)}</div>
-        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;">${z.tables.length} столов · до ${z.capacity} чел.</div>
+        <div style="font-size:12px;color:var(--ink-soft);margin-top:3px;">${z.tables.length} столов · до ${zoneCapacity(z)} чел.</div>
       </div>
       <div style="font-size:18px;color:var(--accent);">→</div>
     </div>
