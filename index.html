@@ -124,7 +124,9 @@
   .floor-canvas.editing { background: repeating-linear-gradient(45deg, rgba(184,149,106,0.05), rgba(184,149,106,0.05) 10px, transparent 10px, transparent 20px), var(--bg); }
 
   .floor-plan { display: grid; gap: 0; transform-origin: top left; transition: transform 0.15s; }
-  .floor-plan.layout-3col { grid-template-columns: repeat(3, max-content); justify-content: start; }
+  .floor-plan.layout-3col .zone { flex: 0 0 auto; }
+  .floor-plan.layout-3col { display: flex; flex-direction: row; align-items: stretch; }
+  .floor-plan.layout-3col .zone { width: max-content; }
   .floor-plan.layout-3row { grid-template-columns: 1fr; grid-auto-rows: auto; }
   .floor-plan.layout-1zone { grid-template-columns: 1fr; }
 
@@ -979,6 +981,7 @@ function gridLayout(items, cols, w, h, gapX, gapY) {
 
 const STORAGE_KEY = 'reservation-app-v3';
 const API_CONFIG_KEY = 'reservation-app-api-config';
+let lastSchemaSaveAt = 0; // Время последнего ручного сохранения схемы (защита от перезаписи синхронизацией)
 
 // ============================================================================
 // API КЛИЕНТ — общение с Google Apps Script
@@ -1207,6 +1210,16 @@ function applyServerData(data) {
     Object.keys(data.schemas).forEach(restId => {
       if (STATE.config.restaurants[restId]) {
         STATE.config.restaurants[restId] = data.schemas[restId];
+        // Чистим устаревший decor «Бар» только в отображении — БЕЗ пересохранения на сервер,
+        // чтобы не конфликтовать с сохранением ширины/позиций зон
+        const r = STATE.config.restaurants[restId];
+        if (r.zones) {
+          r.zones.forEach(z => {
+            if (Array.isArray(z.decor) && z.decor.length) {
+              z.decor = z.decor.filter(d => d && d.type !== 'Бар');
+            }
+          });
+        }
       }
     });
   }
@@ -1366,8 +1379,6 @@ async function saveSettingsToServer() {
     return false;
   }
 }
-
-let lastSchemaSaveAt = 0; // Время последнего сохранения схемы
 
 async function saveSchemasToServer() {
   saveStorage();
@@ -1622,6 +1633,11 @@ function renderFloorPlan() {
     const zEl = document.createElement('div');
     zEl.className = 'zone';
     zEl.dataset.zoneId = zone.id;
+    // Применяем сохранённую ширину зоны (если управляющий менял её в редакторе)
+    if (zone.width && zone.width > 0) {
+      zEl.style.width = zone.width + 'px';
+      zEl.style.flexShrink = '0';
+    }
 
     const header = document.createElement('div');
     header.className = 'zone-header';
