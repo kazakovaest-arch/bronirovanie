@@ -3342,21 +3342,29 @@ document.getElementById('api-save-btn').addEventListener('click', async () => {
   statusEl.style.background = '#fef3c7';
   statusEl.style.color = '#92400e';
   statusEl.textContent = '⏳ Подключение и загрузка данных...';
-  API.saveConfig(url, password);
-  const ok = await fetchAllFromServer();
-  if (ok) {
-    statusEl.style.background = '#d1fae5';
-    statusEl.style.color = '#065f46';
-    statusEl.textContent = '✓ Подключено! Загружено броней: ' + STATE.bookings.length;
-    setTimeout(() => {
-      closeApiConfig();
-      startPeriodicSync();
-      render();
-    }, 1200);
-  } else {
+  try {
+    API.saveConfig(url, password);
+    const ok = await fetchAllFromServer();
+    if (ok) {
+      statusEl.style.background = '#d1fae5';
+      statusEl.style.color = '#065f46';
+      statusEl.textContent = '✓ Подключено! Загружено броней: ' + STATE.bookings.length;
+      populateSelects();
+      setTimeout(() => {
+        closeApiConfig();
+        startPeriodicSync();
+        render();
+      }, 1200);
+    } else {
+      statusEl.style.background = '#fee2e2';
+      statusEl.style.color = '#991b1b';
+      statusEl.textContent = '✗ Ошибка: ' + (API.lastError || 'не удалось загрузить данные. Проверь что URL правильный и в Apps Script выбран доступ «Все».');
+      API.clearConfig();
+    }
+  } catch (e) {
     statusEl.style.background = '#fee2e2';
     statusEl.style.color = '#991b1b';
-    statusEl.textContent = '✗ Не удалось загрузить данные: ' + (API.lastError || 'неизвестная ошибка');
+    statusEl.textContent = '✗ Ошибка подключения: ' + String(e.message || e);
     API.clearConfig();
   }
 });
