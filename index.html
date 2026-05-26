@@ -250,6 +250,8 @@
   .vip-badge { background: var(--gold); color: white; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; letter-spacing: 0.05em; }
   .booking-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
   .booking-tag { background: var(--bg-alt); font-size: 10px; padding: 2px 6px; border-radius: 4px; color: var(--ink-soft); }
+  .booking-note { font-size: 12px; color: var(--ink); margin-top: 5px; line-height: 1.4; background: rgba(184,149,106,0.08); padding: 5px 8px; border-radius: 6px; border-left: 2px solid var(--gold); }
+  .booking-note-label { font-weight: 600; color: var(--ink-soft); font-size: 11px; }
   .btn-walkin-close { background: #7c3aed; color: white; padding: 4px 10px; font-size: 11px; border-radius: 5px; font-weight: 600; margin-top: 6px; width: 100%; }
   .btn-walkin-close:hover { background: #6d28d9; }
 
@@ -1983,7 +1985,7 @@ function renderBookingsList() {
             <span>${b.guests} чел.</span>
             <span>стол ${(b.tables || []).join(', ')}</span>
           </div>
-          ${b.comment ? `<div class="booking-meta" style="margin-top:2px;"><span>${escapeHtml(b.comment)}</span></div>` : ''}
+          ${b.comment ? `<div class="booking-note"><span class="booking-note-label">Комментарий:</span> ${escapeHtml(b.comment)}</div>` : ''}
           ${closeBtn}
         </div>
       `;
@@ -1993,11 +1995,13 @@ function renderBookingsList() {
   if (regular.length > 0) {
     if (walkins.length > 0) html += `<div class="group-header">Брони <span class="group-count">${regular.length}</span></div>`;
     html += regular.map(b => {
+      // Теги-галочки — показываем все отмеченные
       const tags = [];
+      if (b.vip) tags.push('⭐ VIP');
       if (b.preorder) tags.push('Предзаказ');
-      if (b.deposit && b.depositPaid) tags.push('Депозит ' + b.deposit + '₽');
-      else if (b.deposit) tags.push('Депозит не внесён');
-      if (b.wishes) tags.push(b.wishes.length > 24 ? b.wishes.slice(0, 22) + '…' : b.wishes);
+      if (b.deposit && b.depositPaid) tags.push('Депозит ' + b.deposit + '₽ внесён');
+      else if (b.deposit) tags.push('Депозит ' + b.deposit + '₽ не внесён');
+      else if (b.depositPaid) tags.push('Депозит внесён');
       return `
         <div class="booking-card" data-id="${b.id}">
           <div class="booking-time-row">
@@ -2012,7 +2016,11 @@ function renderBookingsList() {
           </div>
           <div class="booking-meta" style="margin-top:2px;">
             <span>${escapeHtml(b.phone || '—')}</span>
+            ${b.guestType ? `<span>${escapeHtml(b.guestType)}</span>` : ''}
+            ${b.manager ? `<span>${escapeHtml(b.manager)}</span>` : ''}
           </div>
+          ${b.wishes ? `<div class="booking-note"><span class="booking-note-label">Пожелания:</span> ${escapeHtml(b.wishes)}</div>` : ''}
+          ${b.comment ? `<div class="booking-note"><span class="booking-note-label">Комментарий:</span> ${escapeHtml(b.comment)}</div>` : ''}
           ${tags.length ? '<div class="booking-tags">' + tags.map(t => `<span class="booking-tag">${escapeHtml(t)}</span>`).join('') + '</div>' : ''}
         </div>
       `;
