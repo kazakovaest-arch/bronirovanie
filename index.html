@@ -390,13 +390,14 @@
       <button data-rest="galereya">Галерея вкусов</button>
     </div>
     <div class="topbar-spacer"></div>
+    <button class="topbar-btn" id="btn-become-admin">🔑 Управляющий</button>
     <button class="topbar-btn" id="btn-edit-schema" style="display:none;">✎ Редактор схемы</button>
     <button class="topbar-btn" id="btn-settings" style="display:none;">⚙ Настройки</button>
     <div class="conn-indicator" id="conn-indicator" title="Состояние подключения">
       <span class="conn-dot"></span>
       <span class="conn-label" id="conn-label">Не подключено</span>
     </div>
-    <div class="user-chip" id="user-chip" title="Сменить роль">
+    <div class="user-chip" id="user-chip" title="Выйти / сменить ресторан">
       <span class="dot"></span>
       <span id="user-role">Хостес · Доброград</span>
     </div>
@@ -462,7 +463,10 @@
 
     <section class="floor-area">
       <div class="floor-header">
-        <div class="floor-title" id="floor-title">План посадки</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="floor-title" id="floor-title">План посадки</div>
+          <span id="readonly-badge" style="display:none;font-size:11px;font-weight:600;color:var(--warn);background:#fef3c7;padding:3px 10px;border-radius:6px;">👁 только просмотр</span>
+        </div>
         <div class="floor-actions">
           <button class="btn btn-walkin" id="btn-walkin">👤 Гость пришёл</button>
           <button class="btn btn-warning" id="btn-book-zone">Зал целиком</button>
@@ -787,6 +791,42 @@
     </div>
     <div class="modal-body">
       <div id="zone-pick-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ВХОД ХОСТЕС (выбор ресторана + пароль) -->
+<div class="modal-overlay" id="login-overlay">
+  <div class="modal" style="max-width: 460px;">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Вход в систему</div>
+        <div class="modal-subtitle">Выбери свой ресторан и введи пароль</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Ресторан</label>
+        <div class="restaurant-tabs" id="login-rest-tabs" style="margin-bottom: 4px;">
+          <button class="active" data-rest="dobrograd">Доброград</button>
+          <button data-rest="terrasa">Терраса</button>
+          <button data-rest="galereya">Галерея</button>
+        </div>
+      </div>
+      <div class="field" style="margin-top: 16px;">
+        <label>Пароль<span class="req">*</span></label>
+        <input type="password" id="login-password" placeholder="Введите пароль ресторана" autocomplete="off">
+        <div class="field-error" id="login-error">Неверный пароль</div>
+      </div>
+      <div style="margin-top: 16px; padding: 10px 14px; background: var(--bg-alt); border-radius: 8px; font-size: 12px; color: var(--ink-soft); line-height: 1.5;">
+        Хостес видит загрузку всех ресторанов, но создавать и менять брони может только в своём.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div></div>
+      <div class="modal-footer-right">
+        <button class="btn btn-primary" id="login-submit">Войти</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1127,6 +1167,13 @@ function loadPendingQueue() {
 // ============================================================================
 // СОСТОЯНИЕ
 // ============================================================================
+// Пароли входа для хостес каждого ресторана (зашиты в коде)
+const RESTAURANT_PASSWORDS = {
+  dobrograd: 'dobrograd2026',
+  terrasa: 'terrasa2026',
+  galereya: 'galereya2026',
+};
+
 const STATE = {
   currentRestaurant: 'dobrograd',
   currentDate: todayISO(),
@@ -1141,7 +1188,16 @@ const STATE = {
   staffEditTab: 'dobrograd',
   walkinSelectedTables: new Set(),
   formSelectedTables: new Set(),
+  userRestaurant: null,  // ресторан под которым вошла хостес (её домашний)
+  loggedIn: false,       // выполнен ли вход
 };
+
+// Может ли текущий пользователь редактировать текущий ресторан?
+// Управляющий — везде. Хостес — только в своём ресторане.
+function canEdit() {
+  if (STATE.isAdmin) return true;
+  return STATE.userRestaurant === STATE.currentRestaurant;
+}
 
 function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -1569,12 +1625,28 @@ function render() {
   });
   document.getElementById('btn-edit-schema').style.display = STATE.isAdmin ? '' : 'none';
   document.getElementById('btn-settings').style.display = STATE.isAdmin ? '' : 'none';
+  // Кнопка "Управляющий": подсвечена когда режим активен
+  const adminBtn = document.getElementById('btn-become-admin');
+  if (adminBtn) {
+    adminBtn.textContent = STATE.isAdmin ? '🔑 Управляющий ✓' : '🔑 Управляющий';
+    adminBtn.classList.toggle('active', STATE.isAdmin);
+  }
+  // Кнопки создания броней — только если есть право редактировать текущий ресторан
+  const editable = canEdit();
+  ['btn-new-booking', 'btn-walkin', 'btn-book-zone'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = editable ? '' : 'none';
+  });
+  // Подсказка «только просмотр» если хостес в чужом ресторане
+  const roEl = document.getElementById('readonly-badge');
+  if (roEl) roEl.style.display = (!editable && STATE.loggedIn) ? '' : 'none';
 }
 
 function renderTopBar() {
   const role = document.getElementById('user-role');
   const restName = STATE.config.restaurants[STATE.currentRestaurant].name;
-  role.textContent = STATE.isAdmin ? `Управляющий · все рестораны` : `Хостес · ${restName}`;
+  const homeRestName = STATE.userRestaurant ? STATE.config.restaurants[STATE.userRestaurant].name : '';
+  role.textContent = STATE.isAdmin ? `Управляющий · все рестораны` : `Хостес · ${homeRestName}`;
   document.getElementById('user-chip').classList.toggle('admin', STATE.isAdmin);
   document.querySelectorAll('#restaurant-switcher button').forEach(b => {
     b.classList.toggle('active', b.dataset.rest === STATE.currentRestaurant);
@@ -2142,6 +2214,11 @@ function fillSelect(id, items, withEmpty) {
 }
 
 function openModal(bookingId, prefill) {
+  // Нет права редактировать этот ресторан — создавать новые брони нельзя
+  if (!canEdit() && !bookingId) {
+    showToast('В этом ресторане можно только смотреть. Создавать брони может хостес ' + STATE.config.restaurants[STATE.currentRestaurant].name, 'error');
+    return;
+  }
   const overlay = document.getElementById('modal-overlay');
   const rest = STATE.config.restaurants[STATE.currentRestaurant];
   document.getElementById('f-pass-wrapper').style.display = rest.showPassField ? '' : 'none';
@@ -2226,6 +2303,15 @@ function openModal(bookingId, prefill) {
   updateEndTime();
   renderTablePicker();
   checkConflicts();
+
+  // Режим просмотра — если нет права редактировать этот ресторан
+  const editable = canEdit();
+  document.getElementById('btn-save').style.display = editable ? '' : 'none';
+  if (!editable) {
+    document.getElementById('btn-delete').style.display = 'none';
+    document.getElementById('modal-subtitle').textContent += ' · 👁 только просмотр';
+  }
+
   overlay.classList.add('active');
 }
 
@@ -2403,6 +2489,7 @@ function validateForm() {
 }
 
 function saveBooking() {
+  if (!canEdit()) { showToast('Нет прав на редактирование этого ресторана', 'error'); return; }
   if (!validateForm()) {
     showToast('Заполните обязательные поля', 'error');
     shakeModal();
@@ -2531,6 +2618,12 @@ function deleteBooking() {
 let walkinEditingId = null;
 
 function openWalkin() {
+  if (!canEdit()) {
+    showToast('В этом ресторане можно только смотреть', 'error');
+    return;
+  }
+  const wSave = document.getElementById('walkin-save');
+  if (wSave) wSave.style.display = '';
   walkinEditingId = null;
   STATE.walkinSelectedTables.clear();
   document.getElementById('walkin-name').value = 'Гость';
@@ -2545,6 +2638,9 @@ function openWalkin() {
 
 function openWalkinForEdit(b) {
   walkinEditingId = b.id;
+  // Управление кнопкой сохранения для walkin-формы
+  const wSave = document.getElementById('walkin-save');
+  if (wSave) wSave.style.display = canEdit() ? '' : 'none';
   STATE.walkinSelectedTables.clear();
   (b.tables || []).forEach(t => STATE.walkinSelectedTables.add(t));
   document.getElementById('walkin-name').value = b.name || 'Гость';
@@ -2606,6 +2702,7 @@ function renderWalkinTablePicker() {
 }
 
 function saveWalkin() {
+  if (!canEdit()) { showToast('Нет прав на редактирование этого ресторана', 'error'); return; }
   clearWalkinErrors();
   const guests = parseInt(document.getElementById('walkin-guests').value) || 0;
   if (guests < 1) {
@@ -2672,6 +2769,7 @@ function saveWalkin() {
 }
 
 function closeWalkin(id) {
+  if (!canEdit()) { showToast('В этом ресторане можно только смотреть', 'error'); return; }
   if (!confirm('Подтвердить, что гость ушёл?')) return;
   const idx = STATE.bookings.findIndex(b => b.id === id);
   if (idx < 0) return;
@@ -3075,6 +3173,7 @@ document.querySelectorAll('.field-edit-btn[data-list]').forEach(btn => {
 // БРОНЬ ЦЕЛОГО ЗАЛА
 // ============================================================================
 document.getElementById('btn-book-zone').addEventListener('click', () => {
+  if (!canEdit()) { showToast('В этом ресторане можно только смотреть', 'error'); return; }
   const rest = STATE.config.restaurants[STATE.currentRestaurant];
   const list = document.getElementById('zone-pick-list');
   list.innerHTML = rest.zones.map(z => `
@@ -3129,18 +3228,39 @@ function tryAdminLogin() {
 }
 
 document.getElementById('user-chip').addEventListener('click', () => {
-  if (STATE.isAdmin) {
-    if (confirm('Выйти из режима Управляющего?')) {
-      STATE.isAdmin = false;
-      STATE.editingSchema = false;
-      document.getElementById('edit-toolbar').style.display = 'none';
-      render();
-      showToast('Вы вышли из режима Управляющего', 'success');
-    }
-  } else {
-    requestAdmin(null);
+  if (confirm('Выйти и сменить ресторан / пользователя?')) {
+    logout();
   }
 });
+
+// Кнопка "Управляющий" — вход в режим управляющего по паролю
+document.getElementById('btn-become-admin').addEventListener('click', () => {
+  if (STATE.isAdmin) {
+    if (confirm('Выйти из режима управляющего (остаться хостес)?')) {
+      STATE.isAdmin = false;
+      STATE.editingSchema = false;
+      const tb = document.getElementById('edit-toolbar');
+      if (tb) tb.style.display = 'none';
+      render();
+      showToast('Режим управляющего выключен', 'success');
+    }
+    return;
+  }
+  requestAdmin(null);
+});
+
+// Выход из системы — сброс входа и возврат к окну входа
+function logout() {
+  STATE.isAdmin = false;
+  STATE.loggedIn = false;
+  STATE.userRestaurant = null;
+  STATE.editingSchema = false;
+  const toolbar = document.getElementById('edit-toolbar');
+  if (toolbar) toolbar.style.display = 'none';
+  // Закрываем все открытые модалки
+  document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+  openLogin();
+}
 
 // ============================================================================
 // СОБЫТИЯ
@@ -3480,6 +3600,76 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ============================================================================
+// ВХОД ХОСТЕС
+// ============================================================================
+let loginSelectedRest = 'dobrograd';
+
+// Переключение ресторана в окне входа
+document.querySelectorAll('#login-rest-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#login-rest-tabs button').forEach(b => b.classList.toggle('active', b === btn));
+    loginSelectedRest = btn.dataset.rest;
+    document.getElementById('login-error').classList.remove('show');
+    document.getElementById('login-password').focus();
+  });
+});
+
+function openLogin() {
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').classList.remove('show');
+  document.getElementById('login-overlay').classList.add('active');
+  setTimeout(() => document.getElementById('login-password').focus(), 100);
+}
+
+function tryLogin() {
+  const pwd = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  // Проверяем пароль выбранного ресторана
+  if (pwd === RESTAURANT_PASSWORDS[loginSelectedRest]) {
+    STATE.userRestaurant = loginSelectedRest;
+    STATE.currentRestaurant = loginSelectedRest;
+    STATE.loggedIn = true;
+    document.getElementById('login-overlay').classList.remove('active');
+    afterLogin();
+    return;
+  }
+  // Проверяем не пароль ли это управляющего — тогда полный доступ
+  if (pwd === STATE.config.adminPassword) {
+    STATE.isAdmin = true;
+    STATE.userRestaurant = loginSelectedRest;
+    STATE.currentRestaurant = loginSelectedRest;
+    STATE.loggedIn = true;
+    document.getElementById('login-overlay').classList.remove('active');
+    showToast('Вход управляющего — полный доступ', 'success');
+    afterLogin();
+    return;
+  }
+  errEl.classList.add('show');
+}
+
+document.getElementById('login-submit').addEventListener('click', tryLogin);
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryLogin();
+});
+
+// Что происходит после успешного входа хостес
+function afterLogin() {
+  render();
+  updateConnIndicator();
+  if (API.enabled) {
+    fetchAllFromServer().then(ok => {
+      if (ok) {
+        startPeriodicSync();
+        populateSelects();
+        render();
+      }
+    });
+  } else {
+    setTimeout(() => openApiConfig(false), 400);
+  }
+}
+
+// ============================================================================
 // СТАРТ
 // ============================================================================
 API.init();
@@ -3490,19 +3680,8 @@ document.getElementById('toggle-show-cap').checked = STATE.config.showCapacity;
 render();
 updateConnIndicator();
 
-// Если API настроен — синхронизируемся с сервером сразу
-if (API.enabled) {
-  fetchAllFromServer().then(ok => {
-    if (ok) {
-      startPeriodicSync();
-      populateSelects();
-      render();
-    }
-  });
-} else {
-  // Первый запуск — показываем окно настройки
-  setTimeout(() => openApiConfig(false), 500);
-}
+// Сначала — вход хостес
+openLogin();
 
 </script>
 </body>
