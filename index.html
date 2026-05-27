@@ -806,11 +806,12 @@
     </div>
     <div class="modal-body">
       <div class="field">
-        <label>Ресторан</label>
-        <div class="restaurant-tabs" id="login-rest-tabs" style="margin-bottom: 4px;">
+        <label>Кто входит</label>
+        <div class="restaurant-tabs" id="login-rest-tabs" style="margin-bottom: 4px; flex-wrap: wrap;">
           <button class="active" data-rest="dobrograd">Доброград</button>
           <button data-rest="terrasa">Терраса</button>
           <button data-rest="galereya">Галерея</button>
+          <button data-rest="admin" style="background: var(--gold); color: white;">🔑 Управляющий</button>
         </div>
       </div>
       <div class="field" style="margin-top: 16px;">
@@ -3218,6 +3219,7 @@ function tryAdminLogin() {
   const val = document.getElementById('pwd-input').value;
   if (val === STATE.config.adminPassword) {
     STATE.isAdmin = true;
+    saveLoginSession();
     document.getElementById('pwd-overlay').classList.remove('active');
     showToast('Вход управляющего', 'success');
     render();
@@ -3239,6 +3241,7 @@ document.getElementById('btn-become-admin').addEventListener('click', () => {
     if (confirm('Выйти из режима управляющего (остаться хостес)?')) {
       STATE.isAdmin = false;
       STATE.editingSchema = false;
+      saveLoginSession();
       const tb = document.getElementById('edit-toolbar');
       if (tb) tb.style.display = 'none';
       render();
@@ -3255,6 +3258,7 @@ function logout() {
   STATE.loggedIn = false;
   STATE.userRestaurant = null;
   STATE.editingSchema = false;
+  clearLoginSession();
   const toolbar = document.getElementById('edit-toolbar');
   if (toolbar) toolbar.style.display = 'none';
   // Закрываем все открытые модалки
@@ -3614,6 +3618,42 @@ document.querySelectorAll('#login-rest-tabs button').forEach(btn => {
   });
 });
 
+const SESSION_KEY = 'reservation-app-session';
+const SESSION_DURATION = 12 * 60 * 60 * 1000; // 12 часов
+
+function saveLoginSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      userRestaurant: STATE.userRestaurant,
+      isAdmin: STATE.isAdmin,
+      savedAt: Date.now(),
+    }));
+  } catch (e) { /* localStorage может быть переполнен — не критично */ }
+}
+
+function loadLoginSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s || !s.savedAt) return false;
+    // Проверяем что сессия не истекла (12 часов)
+    if (Date.now() - s.savedAt > SESSION_DURATION) {
+      localStorage.removeItem(SESSION_KEY);
+      return false;
+    }
+    STATE.userRestaurant = s.userRestaurant || 'dobrograd';
+    STATE.currentRestaurant = STATE.userRestaurant;
+    STATE.isAdmin = !!s.isAdmin;
+    STATE.loggedIn = true;
+    return true;
+  } catch (e) { return false; }
+}
+
+function clearLoginSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+
 function openLogin() {
   document.getElementById('login-password').value = '';
   document.getElementById('login-error').classList.remove('show');
@@ -3624,23 +3664,31 @@ function openLogin() {
 function tryLogin() {
   const pwd = document.getElementById('login-password').value;
   const errEl = document.getElementById('login-error');
-  // Проверяем пароль выбранного ресторана
+
+  // Если выбран "Управляющий" — проверяем только админский пароль
+  if (loginSelectedRest === 'admin') {
+    if (pwd === STATE.config.adminPassword) {
+      STATE.isAdmin = true;
+      STATE.userRestaurant = 'dobrograd'; // дефолтный, но isAdmin даёт права везде
+      STATE.currentRestaurant = 'dobrograd';
+      STATE.loggedIn = true;
+      saveLoginSession();
+      document.getElementById('login-overlay').classList.remove('active');
+      showToast('Вход управляющего — полный доступ', 'success');
+      afterLogin();
+      return;
+    }
+    errEl.classList.add('show');
+    return;
+  }
+
+  // Выбран конкретный ресторан — проверяем его пароль
   if (pwd === RESTAURANT_PASSWORDS[loginSelectedRest]) {
     STATE.userRestaurant = loginSelectedRest;
     STATE.currentRestaurant = loginSelectedRest;
     STATE.loggedIn = true;
+    saveLoginSession();
     document.getElementById('login-overlay').classList.remove('active');
-    afterLogin();
-    return;
-  }
-  // Проверяем не пароль ли это управляющего — тогда полный доступ
-  if (pwd === STATE.config.adminPassword) {
-    STATE.isAdmin = true;
-    STATE.userRestaurant = loginSelectedRest;
-    STATE.currentRestaurant = loginSelectedRest;
-    STATE.loggedIn = true;
-    document.getElementById('login-overlay').classList.remove('active');
-    showToast('Вход управляющего — полный доступ', 'success');
     afterLogin();
     return;
   }
@@ -3680,8 +3728,15 @@ document.getElementById('toggle-show-cap').checked = STATE.config.showCapacity;
 render();
 updateConnIndicator();
 
-// Сначала — вход хостес
-openLogin();
+// Пробуем восстановить сохранённую сессию (действует 12 часов)
+if (loadLoginSession()) {
+  // Сессия валидна — пропускаем окно входа
+  render();
+  afterLogin();
+} else {
+  // Сессия не найдена или истекла — показываем окно входа
+  openLogin();
+}
 
 </script>
 </body>
