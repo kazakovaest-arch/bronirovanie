@@ -545,6 +545,7 @@
             <option value="5">5ч (банкет)</option>
             <option value="6">6ч (банкет)</option>
             <option value="8">8ч (закрытие зала)</option>
+            <option value="allday">Весь день (12:00–23:00)</option>
           </select>
         </div>
         <div class="field">
@@ -1572,7 +1573,8 @@ function minutesToTime(m) {
   return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
 }
 function endTime(start, durationHours) {
-  return minutesToTime(timeToMinutes(start) + Math.round(durationHours * 60));
+  if (durationHours === 'allday' || String(durationHours) === 'allday') return '23:00';
+  return minutesToTime(timeToMinutes(start) + Math.round(parseFloat(durationHours) * 60));
 }
 
 // Считает вместимость зоны как сумму мест всех её столов (автоподсчёт)
@@ -1599,6 +1601,8 @@ function bookingActiveAt(b, dateISO, hhmm) {
 function bookingsTimeOverlap(b1, b2) {
   if (b1.date !== b2.date) return false;
   if (['cancelled', 'noshow', 'done'].includes(b1.status) || ['cancelled', 'noshow', 'done'].includes(b2.status)) return false;
+  // Весь день пересекается с любым временем
+  if (b1.duration === 'allday' || b2.duration === 'allday') return true;
   const s1 = timeToMinutes(b1.time);
   const e1 = timeToMinutes(endTime(b1.time, parseFloat(b1.duration || 2.25)));
   const s2 = timeToMinutes(b2.time);
@@ -1883,7 +1887,7 @@ function renderFloorPlan() {
             if (b.isWalkin) {
               return `<div class="table-info-row"><span class="table-info-walkin">Гость · ${b.guests}</span></div>`;
             }
-            return `<div class="table-info-row"><span class="ti-time">${b.time}</span> <span class="ti-name">${escapeHtml(b.name || '—')}</span></div>`;
+            return `<div class="table-info-row"><span class="ti-time">${b.duration === 'allday' ? 'Весь день' : b.time}</span> <span class="ti-name">${escapeHtml(b.name || '—')}</span></div>`;
           }).join('');
           info.innerHTML = lines + (tableBookings.length > 3 ? `<div class="table-info-multi">+${tableBookings.length - 3} ещё</div>` : '');
         } else {
@@ -2129,7 +2133,7 @@ function renderBookingsList() {
       return `
         <div class="booking-card" data-id="${b.id}">
           <div class="booking-time-row">
-            <div class="booking-time">${b.time}–${endTime(b.time, parseFloat(b.duration || 2.25))}</div>
+            <div class="booking-time">${b.duration === 'allday' ? '12:00–23:00' : b.time + '–' + endTime(b.time, parseFloat(b.duration || 2.25))}</div>
             <span class="booking-status ${b.status}">${statusLabels[b.status] || b.status}</span>
           </div>
           <div class="booking-name">${escapeHtml(b.name || '—')}${b.vip ? '<span class="vip-badge">VIP</span>' : ''}${(b.occasion || '').includes('День рождения') || (b.occasion || '').includes('Юбилей') ? '<span title="' + escapeHtml(b.occasion) + '" style="font-size:16px;line-height:1;">🎂</span>' : ''}</div>
@@ -2196,7 +2200,7 @@ function showTooltip(e, bookings, table) {
     } else {
       tt.innerHTML = `<strong>Стол ${escapeHtml(table.id)}</strong> · ${table.cap} мест
         <div class="tt-row">${escapeHtml(b.name || '—')} ${b.vip ? '⭐' : ''}</div>
-        <div class="tt-row">${b.time}–${endTime(b.time, parseFloat(b.duration || 2.25))} · ${b.guests} гост.</div>
+        <div class="tt-row">${b.duration === 'allday' ? '12:00–23:00' : b.time + '–' + endTime(b.time, parseFloat(b.duration || 2.25))} · ${b.guests} гост.</div>
         <div class="tt-row">${escapeHtml(b.phone || '')}</div>
         ${b.occasion ? `<div class="tt-row">Повод: ${escapeHtml(b.occasion)}</div>` : ''}
         ${b.wishes ? `<div class="tt-row">⚐ ${escapeHtml(b.wishes)}</div>` : ''}`;
@@ -2329,6 +2333,10 @@ function openModal(bookingId, prefill) {
 
     document.getElementById('f-date').value = STATE.currentDate;
     document.getElementById('f-time').value = STATE.currentTime || '19:00';
+    // Сбрасываем allday при открытии новой формы
+    if (document.getElementById('f-duration').value === 'allday') {
+      document.getElementById('f-duration').value = '2.25';
+    }
     document.getElementById('f-duration').value = '2.25';
     document.getElementById('f-adults').value = 2;
     document.getElementById('f-kids').value = 0;
@@ -3398,7 +3406,14 @@ document.getElementById('f-phone').addEventListener('blur', e => {
 
 document.getElementById('f-time').addEventListener('input', () => { updateEndTime(); renderTablePicker(); checkConflicts(); });
 document.getElementById('f-date').addEventListener('input', () => { renderTablePicker(); checkConflicts(); });
-document.getElementById('f-duration').addEventListener('change', () => { updateEndTime(); renderTablePicker(); checkConflicts(); });
+document.getElementById('f-duration').addEventListener('change', () => {
+  if (document.getElementById('f-duration').value === 'allday') {
+    document.getElementById('f-time').value = '12:00';
+  }
+  updateEndTime();
+  renderTablePicker();
+  checkConflicts();
+});
 
 document.getElementById('booking-search').addEventListener('input', renderBookingsList);
 
