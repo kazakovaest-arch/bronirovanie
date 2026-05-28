@@ -139,9 +139,9 @@
   .floor-canvas.editing .zone-resizer { background: rgba(184,149,106,0.15); }
   .floor-canvas.editing .zone-resizer:hover { background: rgba(184,149,106,0.5); }
   .zone-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); gap: 8px; }
-  .zone-name { font-family: 'Fraunces', serif; font-size: 15px; font-weight: 600; }
-  .zone-name-edit { font-family: 'Fraunces', serif; font-size: 15px; font-weight: 600; background: white; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; }
-  .zone-stats { font-size: 11px; color: var(--ink-soft); text-align: right; }
+  .zone-name { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; }
+  .zone-name-edit { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; background: white; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .zone-stats { font-size: 13px; color: var(--ink-soft); text-align: right; }
   .zone-edit-actions { display: flex; gap: 4px; }
 
   /* Канвас зоны: внешний (видимый) и внутренний (масштабируемый) */
@@ -183,16 +183,16 @@
   .table-pos.status-walkin { background: var(--table-walkin); border-color: #7c3aed; }
   .table-pos.has-multiple { box-shadow: 0 0 0 2px var(--gold); }
   .table-pos.shape-round { border-radius: 50%; }
-  .table-pos.shape-round .table-info { font-size: 9px; }
+  .table-pos.shape-round .table-info { font-size: 13px; }
   .table-pos.highlight-from-list { transform: translateY(-2px); box-shadow: 0 0 0 3px var(--gold), 0 8px 24px rgba(184,149,106,0.4); border-color: var(--gold); z-index: 6; }
   .table-shape-toggle { position: absolute; top: -10px; left: -10px; background: var(--accent); color: white; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; display: none; align-items: center; justify-content: center; line-height: 1; cursor: pointer; z-index: 20; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
   .table-pos.editing-mode .table-shape-toggle { display: flex; }
   .table-shape-toggle:hover { background: var(--accent-soft); }
 
-  .table-num { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; line-height: 1; }
-  .table-cap { font-size: 9px; color: var(--ink-soft); margin-top: 1px; }
+  .table-num { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; line-height: 1; }
+  .table-cap { font-size: 12px; color: var(--ink-soft); margin-top: 1px; }
   .table-cap-edit { font-size: 11px; padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; width: 30px; text-align: center; background: white; margin-top: 2px; }
-  .table-info { font-size: 10px; margin-top: 3px; font-weight: 500; line-height: 1.25; padding: 0 2px; width: 100%; }
+  .table-info { font-size: 15px; margin-top: 3px; font-weight: 600; line-height: 1.25; padding: 0 2px; width: 100%; }
   .table-info-row { display: flex; justify-content: center; gap: 3px; align-items: center; }
   .table-info-row .ti-time { font-weight: 700; }
   .table-info-row .ti-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -1812,8 +1812,8 @@ function renderFloorPlan() {
     // Определяем "внутренний" размер канваса (где живут столы в их собственных координатах)
     let maxX = 320, maxY = 280;
     zone.tables.forEach(t => {
-      maxX = Math.max(maxX, (t.x || 0) + (t.w || 100) + 20);
-      maxY = Math.max(maxY, (t.y || 0) + (t.h || 75) + 20);
+      maxX = Math.max(maxX, (t.x || 0) + (t.w || 110) + 20);
+      maxY = Math.max(maxY, (t.y || 0) + (t.h || 90) + 20);
     });
     if (zone.decor) zone.decor.forEach(d => {
       maxX = Math.max(maxX, (d.x || 0) + (d.w || 100) + 20);
@@ -1844,8 +1844,8 @@ function renderFloorPlan() {
       if (editing) cell.classList.add('editing-mode');
       cell.style.left = (t.x || 0) + 'px';
       cell.style.top = (t.y || 0) + 'px';
-      cell.style.width = (t.w || 100) + 'px';
-      cell.style.height = (t.h || 75) + 'px';
+      cell.style.width = (t.w || 110) + 'px';
+      cell.style.height = (t.h || 90) + 'px';
       if (t.shape === 'round') cell.classList.add('shape-round');
       cell.dataset.tableId = t.id;
       cell.dataset.zoneId = zone.id;
@@ -2083,7 +2083,14 @@ function renderBookingsList() {
       (b.tables || []).join(' ').toLowerCase().includes(search)
     );
   }
-  bookings.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+  // Сначала активные брони сверху по времени, затем завершённые/отменённые/неявка внизу
+  const closedStatuses = ['done', 'cancelled', 'noshow'];
+  bookings.sort((a, b) => {
+    const aClosed = closedStatuses.includes(a.status) ? 1 : 0;
+    const bClosed = closedStatuses.includes(b.status) ? 1 : 0;
+    if (aClosed !== bClosed) return aClosed - bClosed; // активные сверху
+    return (a.time || '00:00').localeCompare(b.time || '00:00'); // внутри группы — по времени
+  });
   document.getElementById('bookings-count').textContent = bookings.length;
 
   const walkins = bookings.filter(b => b.isWalkin);
