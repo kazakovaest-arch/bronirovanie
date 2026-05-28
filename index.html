@@ -468,6 +468,7 @@
           <span id="readonly-badge" style="display:none;font-size:11px;font-weight:600;color:var(--warn);background:#fef3c7;padding:3px 10px;border-radius:6px;">👁 только просмотр</span>
         </div>
         <div class="floor-actions">
+          <button class="btn btn-secondary" id="btn-print" title="Распечатать или сохранить в PDF">🖨 Печать</button>
           <button class="btn btn-walkin" id="btn-walkin">👤 Гость пришёл</button>
           <button class="btn btn-warning" id="btn-book-zone">Зал целиком</button>
           <button class="btn btn-primary" id="btn-new-booking">＋ Новая бронь</button>
@@ -3358,6 +3359,205 @@ document.getElementById('date-next').addEventListener('click', () => { STATE.cur
 document.getElementById('date-today').addEventListener('click', () => { STATE.currentDate = todayISO(); render(); });
 document.getElementById('date-input').addEventListener('change', e => { STATE.currentDate = e.target.value; render(); });
 
+
+// ========================================================================
+// ПЕЧАТЬ ПЛАНА ПОСАДКИ
+// Только чтение текущих данных, никаких изменений в базе. Открывает новое
+// окно с подготовленным HTML и запускает диалог печати браузера.
+// ========================================================================
+function buildPrintHtml() {
+  const rest = STATE.config.restaurants[STATE.currentRestaurant];
+  const date = STATE.currentDate;
+  const dateRu = formatRuDate(date);
+  const printedAt = new Date().toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+  // Брони на день (активные) + walkin отдельно
+  const dayBookings = bookingsFor(date, STATE.currentRestaurant);
+  const closedStatuses = ['done', 'cancelled', 'noshow'];
+  const active = dayBookings.filter(b => !closedStatuses.includes(b.status));
+  active.sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+  const regular = active.filter(b => !b.isWalkin);
+  const walkins = active.filter(b => b.isWalkin);
+
+  // Считаем гостей
+  const totalGuests = active.reduce((s, b) => s + (b.guests || 0), 0);
+
+  // Какие столы заняты для подсветки на схеме
+  const occupied = {};
+  active.forEach(b => {
+    (b.tables || []).forEach(t => {
+      if (!occupied[t]) occupied[t] = [];
+      occupied[t].push(b);
+    });
+  });
+
+  // Таблица броней
+  let tableRows = '';
+  regular.forEach(b => {
+    const timeText = b.duration === 'allday' ? '12:00–23:00' : (b.time + '–' + endTime(b.time, parseFloat(b.duration || 2.25)));
+    const tables = (b.tables || []).join(', ');
+    const tagsArr = [];
+    if (b.vip) tagsArr.push('VIP');
+    if (b.occasion && b.occasion !== 'Обычный') tagsArr.push(b.occasion);
+    if (b.preorder) tagsArr.push('Предзаказ');
+    if (b.depositPaid) tagsArr.push('Депозит внесён');
+    else if (b.deposit) tagsArr.push('Депозит не внесён');
+    if (b.wishes) tagsArr.push('Пожелание: ' + b.wishes);
+    if (b.comment) tagsArr.push('Коммент: ' + b.comment);
+    const tags = tagsArr.join(' · ');
+    tableRows += '<tr>' +
+      '<td><b>' + escapeHtml(timeText) + '</b></td>' +
+      '<td>' + escapeHtml(tables) + '</td>' +
+      '<td>' + escapeHtml(b.name || '—') + '</td>' +
+      '<td style="text-align:center;">' + (b.guests || 0) + '</td>' +
+      '<td>' + escapeHtml(b.phone || '') + '</td>' +
+      '<td style="font-size:11px;color:#555;">' + escapeHtml(tags) + '</td>' +
+    '</tr>';
+  });
+
+  // Свободные посадки отдельно
+  let walkinRows = '';
+  walkins.forEach(b => {
+    walkinRows += '<tr>' +
+      '<td><b>' + escapeHtml(b.time || '—') + '</b></td>' +
+      '<td>' + escapeHtml((b.tables || []).join(', ')) + '</td>' +
+      '<td>' + escapeHtml(b.name || 'Гость') + '</td>' +
+      '<td style="text-align:center;">' + (b.guests || 0) + '</td>' +
+      '<td>—</td>' +
+      '<td style="font-size:11px;color:#555;">' + escapeHtml(b.comment || '') + '</td>' +
+    '</tr>';
+  });
+
+  // Схема зала как SVG — рисуем столы в их реальных позициях
+  // Находим максимальные размеры canvas всех зон
+  let svgWidth = 0;
+  let maxH = 0;
+  rest.zones.forEach(z => {
+    const scale = 1.3;
+    let zoneW = (z.width || 300) * scale;
+    let zoneH = 0;
+    (z.tables || []).forEach(t => {
+      zoneH = Math.max(zoneH, ((t.y || 0) + (t.h || 90)) * scale + 30);
+    });
+    z.printWidth = zoneW;
+    z.printHeight = Math.max(zoneH, 240);
+    svgWidth += zoneW + 30;
+    maxH = Math.max(maxH, zoneH);
+  });
+
+  let svgContent = '';
+  let xOffset = 0;
+  rest.zones.forEach(z => {
+    // Заголовок зоны
+    svgContent += '<text x="' + (xOffset + 8) + '" y="22" style="font-family:Georgia,serif;font-size:20px;font-weight:600;fill:#2a2522;">' + escapeHtml(z.name) + '</text>';
+    // Столы
+    (z.tables || []).forEach(t => {
+      // Масштабируем размер стола для печати — чтобы крупный шрифт помещался
+      const printScale = 1.3;
+      const tx = xOffset + (t.x || 0) * printScale;
+      const ty = 30 + (t.y || 0) * printScale;
+      const tw = (t.w || 110) * printScale;
+      const th = (t.h || 90) * printScale;
+      const isOccupied = occupied[t.id] && occupied[t.id].length > 0;
+      const fill = isOccupied ? '#fde68a' : '#ffffff';
+      const stroke = isOccupied ? '#b8956a' : '#cdc4b3';
+      const sw = isOccupied ? 1.2 : 0.6;
+
+      if (t.shape === 'round') {
+        const r = Math.min(tw, th) / 2;
+        svgContent += '<circle cx="' + (tx + tw/2) + '" cy="' + (ty + th/2) + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"/>';
+      } else {
+        svgContent += '<rect x="' + tx + '" y="' + ty + '" width="' + tw + '" height="' + th + '" rx="4" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"/>';
+      }
+      // Номер стола
+      svgContent += '<text x="' + (tx + tw/2) + '" y="' + (ty + 24) + '" text-anchor="middle" style="font-family:Georgia,serif;font-size:22px;font-weight:700;fill:#2a2522;">' + escapeHtml(t.id) + '</text>';
+      // Вместимость
+      svgContent += '<text x="' + (tx + tw/2) + '" y="' + (ty + 40) + '" text-anchor="middle" style="font-size:13px;fill:#666;">' + (t.cap || 0) + ' мест</text>';
+      // Если занят — показываем время и имя первой брони
+      if (isOccupied) {
+        const b = occupied[t.id][0];
+        const timeStr = b.duration === 'allday' ? 'весь день' : (b.time || '');
+        svgContent += '<text x="' + (tx + tw/2) + '" y="' + (ty + 60) + '" text-anchor="middle" style="font-size:16px;font-weight:700;fill:#2a2522;">' + escapeHtml(timeStr) + '</text>';
+        const nameShort = (b.name || '').slice(0, 14);
+        svgContent += '<text x="' + (tx + tw/2) + '" y="' + (ty + 78) + '" text-anchor="middle" style="font-size:14px;font-weight:500;fill:#2a2522;">' + escapeHtml(nameShort) + '</text>';
+        if (occupied[t.id].length > 1) {
+          svgContent += '<text x="' + (tx + tw/2) + '" y="' + (ty + 96) + '" text-anchor="middle" style="font-size:12px;fill:#999;">+' + (occupied[t.id].length - 1) + ' бронь(и)</text>';
+        }
+      }
+    });
+    xOffset += z.printWidth + 24;
+  });
+  const svgH = maxH + 30;
+
+  // Собираем HTML страницы
+  const tableSection = regular.length > 0 ?
+    '<h2>Брони на день</h2>' +
+    '<table class="bookings"><thead><tr>' +
+    '<th>Время</th><th>Стол</th><th>Имя гостя</th><th>Гостей</th><th>Телефон</th><th>Заметки</th>' +
+    '</tr></thead><tbody>' + tableRows + '</tbody></table>' : '';
+
+  const walkinSection = walkins.length > 0 ?
+    '<h2>Свободные посадки</h2>' +
+    '<table class="bookings"><thead><tr>' +
+    '<th>Время</th><th>Стол</th><th>Имя</th><th>Гостей</th><th></th><th>Комментарий</th>' +
+    '</tr></thead><tbody>' + walkinRows + '</tbody></table>' : '';
+
+  const emptyMsg = (regular.length === 0 && walkins.length === 0) ?
+    '<div style="text-align:center;padding:40px;color:#888;">На эту дату броней нет</div>' : '';
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(rest.name) + ' — ' + dateRu + '</title>' +
+    '<style>' +
+    '@page { size: A4; margin: 12mm; }' +
+    'body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #2a2522; margin: 0; padding: 0; }' +
+    '.header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #b8956a; padding-bottom: 8px; margin-bottom: 14px; }' +
+    '.header h1 { font-family: Georgia, serif; font-size: 22px; font-weight: 500; margin: 0; }' +
+    '.header .meta { font-size: 12px; color: #6b625b; margin-top: 4px; }' +
+    '.header .printed { font-size: 11px; color: #6b625b; }' +
+    'h2 { font-family: Georgia, serif; font-size: 15px; font-weight: 500; margin: 14px 0 8px; }' +
+    'table.bookings { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 14px; }' +
+    'table.bookings th { text-align: left; padding: 6px 4px; border-bottom: 1px solid #d9d1c2; color: #6b625b; font-weight: 500; }' +
+    'table.bookings td { padding: 6px 4px; border-bottom: 0.5px solid #e8e2d5; vertical-align: top; }' +
+    '.schema { background: #f7f3eb; border-radius: 4px; padding: 8px; margin-top: 8px; }' +
+    '.legend { display: flex; gap: 14px; margin-top: 8px; font-size: 10px; color: #6b625b; }' +
+    '.legend .sw { display: inline-block; width: 10px; height: 10px; vertical-align: middle; margin-right: 4px; }' +
+    '@media print { .no-print { display: none; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }' +
+    '.no-print { padding: 12px; background: #f0e6d3; border-radius: 6px; margin-bottom: 14px; text-align: center; font-size: 13px; }' +
+    '.no-print button { background: #2d4a3e; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-size: 13px; cursor: pointer; margin-left: 8px; }' +
+    '</style></head><body>' +
+    '<div class="no-print">Готово к печати. Нажми <button onclick="window.print()">Печать или сохранить в PDF</button> или закрой окно.</div>' +
+    '<div class="header"><div>' +
+    '<h1>' + escapeHtml(rest.name) + ' — план посадки</h1>' +
+    '<div class="meta">' + dateRu + ' · ' + active.length + ' броней · ' + totalGuests + ' гостей</div>' +
+    '</div><div class="printed">Распечатано ' + printedAt + '</div></div>' +
+    tableSection +
+    walkinSection +
+    emptyMsg +
+    '<h2>Схема зала</h2>' +
+    '<div class="schema"><svg viewBox="0 0 ' + svgWidth + ' ' + svgH + '" style="width:100%;height:auto;">' + svgContent + '</svg></div>' +
+    '<div class="legend">' +
+    '<span><span class="sw" style="background:#fde68a;border:1px solid #b8956a;"></span>Занят</span>' +
+    '<span><span class="sw" style="background:#ffffff;border:1px solid #cdc4b3;"></span>Свободен</span>' +
+    '</div>' +
+    '</body></html>';
+}
+
+function printFloorPlan() {
+  try {
+    const html = buildPrintHtml();
+    const w = window.open('', 'print', 'width=900,height=700');
+    if (!w) {
+      showToast('Браузер заблокировал открытие окна. Разреши всплывающие окна для этого сайта.', 'error');
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  } catch (e) {
+    console.error('Print failed:', e);
+    showToast('Ошибка подготовки печати: ' + (e.message || e), 'error');
+  }
+}
+
+document.getElementById('btn-print').addEventListener('click', printFloorPlan);
 document.getElementById('btn-new-booking').addEventListener('click', () => openModal(null));
 document.getElementById('btn-walkin').addEventListener('click', openWalkin);
 document.getElementById('walkin-cancel').addEventListener('click', () => { document.getElementById('walkin-overlay').classList.remove('active'); });
