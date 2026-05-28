@@ -1203,6 +1203,50 @@ function canEdit() {
 function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+// Приводит дату любого формата к строке YYYY-MM-DD
+function normalizeDate(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  let s = String(val).trim();
+  // Уже YYYY-MM-DD (возможно с временем после)
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // DD.MM.YYYY
+  m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  // DD/MM/YYYY
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  // ISO с временем (например 2026-05-28T00:00:00.000Z) — пробуем распарсить
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const mo = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${d}`;
+  }
+  return s;
+}
+
+// Приводит время к формату HH:MM
+function normalizeTime(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    const h = String(val.getHours()).padStart(2, '0');
+    const m = String(val.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+  let s = String(val).trim();
+  const m = s.match(/(\d{1,2}):(\d{2})/);
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  return s;
+}
+
 // Загружаем последний кэш из localStorage (резервная копия для оффлайн-работы)
 function loadStorage() {
   try {
@@ -1242,13 +1286,20 @@ function applyServerData(data) {
     Object.keys(data.bookings).forEach(restId => {
       (data.bookings[restId] || []).forEach(b => {
         b.restaurant = restId;
+        b.date = normalizeDate(b.date);
+        b.time = normalizeTime(b.time);
         allBookings.push(b);
       });
     });
   }
   // Walkins добавляем в общий список
   if (data.walkins) {
-    data.walkins.forEach(w => { w.isWalkin = true; allBookings.push(w); });
+    data.walkins.forEach(w => {
+      w.isWalkin = true;
+      w.date = normalizeDate(w.date);
+      w.time = normalizeTime(w.time);
+      allBookings.push(w);
+    });
   }
   STATE.bookings = allBookings;
 
@@ -2342,14 +2393,16 @@ function renderTablePicker() {
   const duration = parseFloat(document.getElementById('f-duration').value);
   const candidate = { date, time, duration, status: 'new' };
 
-  // ANY booking on table that overlaps in time = "busy" (warning)
+  // Стол "занят" (жёлтая подсветка) если на него есть активная бронь/посадка в это время
   const busy = new Set();
   STATE.bookings.forEach(b => {
     if (b.id === STATE.editingId) return;
     if (b.restaurant !== STATE.currentRestaurant) return;
+    // Завершённые, отменённые, неявка — стол свободен
+    if (['cancelled', 'noshow', 'done'].includes(b.status)) return;
     if (b.isWalkin) {
-      // walkin — занимает сейчас
-      (b.tables || []).forEach(t => busy.add(t));
+      // walkin (не завершённый) занимает стол, но только в свой день
+      if (b.date === date) (b.tables || []).forEach(t => busy.add(t));
       return;
     }
     if (bookingsTimeOverlap(b, candidate)) (b.tables || []).forEach(t => busy.add(t));
@@ -2408,11 +2461,15 @@ function checkConflicts() {
   STATE.bookings.forEach(b => {
     if (b.id === STATE.editingId) return;
     if (b.restaurant !== STATE.currentRestaurant) return;
+    // Завершённые, отменённые и неявившиеся — стол свободен, не конфликт
+    if (['cancelled', 'noshow', 'done'].includes(b.status)) return;
     const overlap = (b.tables || []).filter(t => STATE.formSelectedTables.has(t));
     if (overlap.length === 0) return;
     if (b.isWalkin) {
-      // walkin — всегда конфликт по столу
-      conflicts.push({ b, tables: overlap, isWalkin: true });
+      // walkin (не завершённый) — конфликт по столу, т.к. гость ещё сидит
+      if (b.date === date) {
+        conflicts.push({ b, tables: overlap, isWalkin: true });
+      }
     } else if (bookingsTimeOverlap(b, candidate)) {
       conflicts.push({ b, tables: overlap, isWalkin: false });
     }
@@ -3563,6 +3620,12 @@ function openDiagnostics() {
   const pending = API.pendingQueue || [];
   const lastSync = API.lastSyncAt ? new Date(API.lastSyncAt).toLocaleTimeString() : 'никогда';
 
+  // Брони на текущую выбранную дату в текущем ресторане
+  const onDate = bookings.filter(b => b.date === STATE.currentDate && b.restaurant === STATE.currentRestaurant);
+  const onDateInfo = onDate.map(b =>
+    '  ' + (b.isWalkin ? '[посадка]' : '[бронь]') + ' ' + (b.time||'?') + ' столы:' + (b.tables||[]).join(',') + ' статус:' + b.status + ' дата:"' + b.date + '"'
+  ).join('\n');
+
   const info = [
     '=== ДИАГНОСТИКА ===',
     '',
@@ -3574,6 +3637,9 @@ function openDiagnostics() {
     'Всего записей: ' + bookings.length,
     'Свободных посадок: ' + walkins.length,
     'По ресторанам: ' + JSON.stringify(byRest),
+    '',
+    '--- Брони на ' + STATE.currentDate + ' (' + STATE.currentRestaurant + ') ---',
+    onDate.length ? onDateInfo : '  (нет броней на эту дату)',
     '',
     '--- Очередь оффлайн ---',
     'Не отправлено на сервер: ' + pending.length,
