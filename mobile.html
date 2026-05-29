@@ -387,6 +387,32 @@
 
 </div>
 
+<!-- ОКНО НАСТРОЙКИ ПОДКЛЮЧЕНИЯ -->
+<div class="overlay" id="api-config-overlay">
+  <div class="sheet">
+    <div class="sheet-header">
+      <div class="sheet-title">Настроить подключение</div>
+      <button class="sheet-close" id="api-config-close">✕</button>
+    </div>
+    <div style="font-size:13px;color:var(--ink-soft);margin-bottom:14px;line-height:1.4;">
+      Введи те же данные, что используешь на ноутбуке. После сохранения подключение будет работать.
+    </div>
+    <div class="field-row">
+      <label>URL Apps Script<span class="req">*</span></label>
+      <textarea id="api-url-input" placeholder="https://script.google.com/macros/s/.../exec" style="min-height:80px;font-size:13px;word-break:break-all;"></textarea>
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Длинная ссылка, заканчивается на /exec</div>
+    </div>
+    <div class="field-row">
+      <label>Пароль API<span class="req">*</span></label>
+      <input type="password" id="api-password-input" placeholder="Пароль из Apps Script" autocomplete="off">
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Тот же пароль что задан в Apps Script</div>
+    </div>
+    <div id="api-test-status" style="display:none;padding:10px;border-radius:8px;margin-top:10px;font-size:13px;text-align:center;"></div>
+    <button class="login-btn" id="api-save-btn">Подключить</button>
+    <div style="font-size:11px;color:var(--ink-soft);text-align:center;margin-top:10px;">Эти данные есть на ноутбуке в окне «Подключение к Google Sheets»</div>
+  </div>
+</div>
+
 <!-- ОКНО ДЕЙСТВИЙ ПО БРОНИ (смена статуса) -->
 <div class="overlay" id="action-overlay">
   <div class="sheet">
@@ -766,9 +792,13 @@ document.getElementById('user-btn').addEventListener('click', logout);
 async function initialLoad() {
   API.init();
   if (!API.enabled) {
-    showToast('Сначала подключи приложение на ноутбуке', 'error');
+    // Нет настроек на этом устройстве — показываем кнопку настройки
     document.getElementById('schema-canvas').innerHTML =
-      '<div style="padding:30px;text-align:center;color:var(--ink-soft);">Открой приложение на ноутбуке и подключи Google Sheets — настройки автоматически синхронизируются в этот браузер тоже после первого подключения.<br><br>Либо открой index.html на этом же устройстве для настройки.</div>';
+      '<div style="padding:20px;text-align:center;color:var(--ink-soft);">' +
+      '<div style="font-size:14px;margin-bottom:14px;line-height:1.5;">Это устройство ещё не подключено к Google Sheets.<br>Данные для подключения есть на ноутбуке.</div>' +
+      '<button class="login-btn" id="btn-setup-api" style="max-width:280px;margin:0 auto;">Настроить подключение</button>' +
+      '</div>';
+    document.getElementById('btn-setup-api').addEventListener('click', openApiConfig);
     return;
   }
   API.setConnState('connecting');
@@ -781,9 +811,92 @@ async function initialLoad() {
     startSync();
   } catch (e) {
     API.setConnState('error', String(e.message || e));
-    showToast('Ошибка подключения: ' + (e.message || e), 'error');
+    showToast('Ошибка: ' + (e.message || e), 'error');
+    // Если ошибка подключения — позволим перенастроить
+    setTimeout(() => {
+      const canvas = document.getElementById('schema-canvas');
+      if (canvas && !canvas.querySelector('.zone-mobile')) {
+        canvas.innerHTML =
+          '<div style="padding:20px;text-align:center;color:var(--ink-soft);">' +
+          '<div style="font-size:14px;margin-bottom:14px;line-height:1.5;color:var(--danger);">Не удалось подключиться</div>' +
+          '<button class="login-btn" id="btn-setup-api-2" style="max-width:280px;margin:0 auto;">Изменить настройки</button>' +
+          '</div>';
+        document.getElementById('btn-setup-api-2').addEventListener('click', openApiConfig);
+      }
+    }, 500);
   }
 }
+
+// ============================================================================
+// ОКНО НАСТРОЙКИ ПОДКЛЮЧЕНИЯ
+// ============================================================================
+function openApiConfig() {
+  document.getElementById('api-url-input').value = API.url || '';
+  document.getElementById('api-password-input').value = API.password || '';
+  document.getElementById('api-test-status').style.display = 'none';
+  document.getElementById('api-config-overlay').classList.add('active');
+}
+
+document.getElementById('api-config-close').addEventListener('click', () => {
+  document.getElementById('api-config-overlay').classList.remove('active');
+});
+
+document.getElementById('api-save-btn').addEventListener('click', async () => {
+  const url = document.getElementById('api-url-input').value.trim();
+  const password = document.getElementById('api-password-input').value;
+  const statusEl = document.getElementById('api-test-status');
+
+  if (!url || !password) {
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#fee2e2';
+    statusEl.style.color = '#991b1b';
+    statusEl.textContent = '✗ Заполни оба поля';
+    return;
+  }
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(url)) {
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#fee2e2';
+    statusEl.style.color = '#991b1b';
+    statusEl.textContent = '✗ URL должен начинаться с https://script.google.com/macros/s/ и заканчиваться на /exec';
+    return;
+  }
+
+  statusEl.style.display = 'block';
+  statusEl.style.background = '#fef3c7';
+  statusEl.style.color = '#92400e';
+  statusEl.textContent = '⏳ Подключение...';
+
+  // Сохраняем настройки
+  API.url = url;
+  API.password = password;
+  API.enabled = true;
+  try {
+    localStorage.setItem(API_CONFIG_KEY, JSON.stringify({
+      url: url, password: password, enabled: true
+    }));
+  } catch (e) {}
+
+  // Пробуем загрузить
+  try {
+    const data = await API.getAll();
+    applyServerData(data);
+    API.lastSyncAt = new Date();
+    API.setConnState('connected');
+    statusEl.style.background = '#d1fae5';
+    statusEl.style.color = '#065f46';
+    statusEl.textContent = '✓ Подключено! Загружено: ' + STATE.bookings.length + ' броней';
+    setTimeout(() => {
+      document.getElementById('api-config-overlay').classList.remove('active');
+      renderAll();
+      startSync();
+    }, 1200);
+  } catch (e) {
+    statusEl.style.background = '#fee2e2';
+    statusEl.style.color = '#991b1b';
+    statusEl.textContent = '✗ Не удалось подключиться: ' + (e.message || e);
+    API.enabled = false;
+  }
+});
 
 function applyServerData(data) {
   if (!data) return;
