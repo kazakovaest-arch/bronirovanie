@@ -607,11 +607,12 @@
           </div>
         </div>
         <div class="field">
-          <label>Менеджер</label>
+          <label>Менеджер<span class="req" id="manager-req-mark">*</span></label>
           <div class="field-with-edit">
             <select id="f-manager"></select>
             <button class="field-edit-btn admin-only" data-list="staff" title="Редактировать сотрудников">✎</button>
           </div>
+          <div class="field-error" id="err-manager"></div>
         </div>
 
         <div class="field" id="f-pass-wrapper">
@@ -2321,6 +2322,9 @@ function openModal(bookingId, prefill) {
     document.getElementById('f-guest-type').value = b.guestType || '';
     document.getElementById('f-source').value = b.source || 'Телефон';
     document.getElementById('f-manager').value = b.manager || '';
+    // Скрываем звёздочку обязательности — старую бронь можно сохранить без менеджера
+    const reqMarkEdit = document.getElementById('manager-req-mark');
+    if (reqMarkEdit) reqMarkEdit.style.display = 'none';
     document.getElementById('f-pass').value = b.pass || '';
     document.getElementById('f-deposit').value = b.deposit || '';
     document.getElementById('f-wishes').value = b.wishes || '';
@@ -2345,6 +2349,9 @@ function openModal(bookingId, prefill) {
     if (document.getElementById('f-duration').value === 'allday') {
       document.getElementById('f-duration').value = '2.25';
     }
+    // Показываем звёздочку обязательности менеджера для новых броней
+    const reqMark = document.getElementById('manager-req-mark');
+    if (reqMark) reqMark.style.display = '';
     document.getElementById('f-duration').value = '2.25';
     document.getElementById('f-adults').value = 2;
     document.getElementById('f-kids').value = 0;
@@ -2558,6 +2565,15 @@ function validateForm() {
     document.getElementById('err-tables').textContent = 'Выберите хотя бы один стол';
     document.getElementById('err-tables').classList.add('show');
     ok = false;
+  }
+  // Менеджер обязателен ТОЛЬКО при создании новой брони (мягкий режим)
+  // При редактировании старой брони не требуем — чтобы не мешать работе хостес
+  if (!STATE.editingId) {
+    const manager = document.getElementById('f-manager').value;
+    if (!manager) {
+      setError('f-manager', 'err-manager', 'Укажите менеджера');
+      ok = false;
+    }
   }
   return ok;
 }
