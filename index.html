@@ -2344,7 +2344,7 @@ function openModal(bookingId, prefill) {
     document.getElementById('change-log-section').style.display = 'none';
 
     document.getElementById('f-date').value = STATE.currentDate;
-    document.getElementById('f-time').value = STATE.currentTime || '19:00';
+    document.getElementById('f-time').value = STATE.currentTime || '';
     // Сбрасываем allday при открытии новой формы
     if (document.getElementById('f-duration').value === 'allday') {
       document.getElementById('f-duration').value = '2.25';
@@ -2519,8 +2519,11 @@ function checkConflicts() {
 function updateEndTime() {
   const time = document.getElementById('f-time').value;
   const dur = parseFloat(document.getElementById('f-duration').value);
+  const endDisplay = document.getElementById('f-end-display');
   if (time && !isNaN(dur)) {
-    document.getElementById('f-end-display').value = endTime(time, dur);
+    endDisplay.value = endTime(time, dur);
+  } else {
+    endDisplay.value = '';
   }
 }
 
