@@ -3548,9 +3548,6 @@ function buildPrintHtml() {
     '<h1>' + escapeHtml(rest.name) + ' — план посадки</h1>' +
     '<div class="meta">' + dateRu + ' · ' + active.length + ' броней · ' + totalGuests + ' гостей</div>' +
     '</div><div class="printed">Распечатано ' + printedAt + '</div></div>' +
-    tableSection +
-    walkinSection +
-    emptyMsg +
     '<h2>Схема зала</h2>' +
     '<div class="schema"><svg viewBox="0 0 ' + svgWidth + ' ' + svgH + '" style="width:100%;height:auto;">' + svgContent + '</svg></div>' +
     '<div class="legend">' +
@@ -3811,13 +3808,13 @@ document.getElementById('api-save-btn').addEventListener('click', async () => {
       statusEl.style.background = '#fee2e2';
       statusEl.style.color = '#991b1b';
       statusEl.textContent = '✗ Ошибка: ' + (API.lastError || 'не удалось загрузить данные. Проверь что URL правильный и в Apps Script выбран доступ «Все».');
-      API.clearConfig();
+      // НЕ очищаем настройки при ошибке — позволяем повторить попытку
     }
   } catch (e) {
     statusEl.style.background = '#fee2e2';
     statusEl.style.color = '#991b1b';
     statusEl.textContent = '✗ Ошибка подключения: ' + String(e.message || e);
-    API.clearConfig();
+    // НЕ очищаем настройки при ошибке — позволяем повторить попытку
   }
 });
 
