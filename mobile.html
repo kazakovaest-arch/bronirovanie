@@ -1353,14 +1353,46 @@ document.getElementById('date-input').addEventListener('change', e => {
 // ============================================================================
 
 // Закрытие модалок
+// Глобальные флаги защиты от двойного нажатия — объявлены вверху чтобы
+// closeOverlays() мог их сбрасывать (защита от "залипания" кнопок)
+let walkinSaving = false;
+let statusChanging = false;
+
 function closeOverlays() {
   document.querySelectorAll('.overlay.active').forEach(o => o.classList.remove('active'));
+  // Сбрасываем застрявшие флаги при закрытии, чтобы кнопки не "залипали"
+  walkinSaving = false;
+  statusChanging = false;
+  // Если кнопка сохранения была отключена — восстанавливаем
+  const saveBtn = document.getElementById('walkin-save');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.style.opacity = '';
+    if (saveBtn.dataset.origText) {
+      saveBtn.textContent = saveBtn.dataset.origText;
+    } else {
+      saveBtn.textContent = 'Посадить гостя';
+    }
+  }
 }
 document.getElementById('action-close').addEventListener('click', closeOverlays);
 document.getElementById('walkin-close').addEventListener('click', closeOverlays);
 document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('click', e => {
-    if (e.target === o) closeOverlays();
+    if (e.target === o) {
+      // Для окна создания свободной посадки — спрашиваем подтверждение,
+      // если есть несохранённые данные. Это защищает хостес от случайного закрытия.
+      if (o.id === 'walkin-overlay') {
+        const nameVal = (document.getElementById('walkin-name').value || '').trim();
+        const guestsVal = document.getElementById('walkin-guests').value;
+        const commentVal = (document.getElementById('walkin-comment').value || '').trim();
+        const hasData = nameVal || (guestsVal && guestsVal !== '2') || commentVal || walkinSelectedTable;
+        if (hasData) {
+          if (!confirm('Закрыть форму без сохранения? Данные будут потеряны.')) return;
+        }
+      }
+      closeOverlays();
+    }
   });
 });
 
@@ -1450,8 +1482,15 @@ function openBookingActions(b) {
 
   // Кнопки смены статуса
   if (isWalkin) {
-    // Walkin — только одна кнопка "Гость ушёл" (если не done)
+    // Walkin — поле редактирования гостей + кнопка завершения
     if (b.status !== 'done') {
+      info += '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;font-weight:600;">Количество гостей</div>';
+      info += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">';
+      info += '<button id="walkin-edit-minus" style="width:44px;height:44px;border-radius:8px;border:1px solid var(--line);background:white;font-size:20px;font-weight:600;">−</button>';
+      info += '<input type="number" id="walkin-edit-guests" min="1" max="50" value="' + (b.guests || 1) + '" style="flex:1;text-align:center;font-size:18px;font-weight:600;padding:10px;border:1px solid var(--line);border-radius:8px;background:white;" autocomplete="off" name="walkin-edit-guests-field">';
+      info += '<button id="walkin-edit-plus" style="width:44px;height:44px;border-radius:8px;border:1px solid var(--line);background:white;font-size:20px;font-weight:600;">+</button>';
+      info += '</div>';
+      info += '<button id="walkin-save-edit" class="login-btn" style="background:var(--accent);margin-bottom:8px;">Сохранить изменения</button>';
       info += '<button class="login-btn" style="background:#8b5cf6;" id="walkin-done-btn">Гость ушёл (завершить)</button>';
     } else {
       info += '<div style="text-align:center;color:var(--ink-soft);font-size:13px;padding:14px;">Эта посадка уже завершена</div>';
@@ -1487,6 +1526,27 @@ function openBookingActions(b) {
     if (doneBtn) {
       doneBtn.addEventListener('click', () => changeBookingStatus(b, 'done'));
     }
+    // Кнопки +/- для гостей
+    const editInput = document.getElementById('walkin-edit-guests');
+    const minusBtn = document.getElementById('walkin-edit-minus');
+    const plusBtn = document.getElementById('walkin-edit-plus');
+    if (minusBtn && editInput) {
+      minusBtn.addEventListener('click', () => {
+        const v = parseInt(editInput.value) || 1;
+        if (v > 1) editInput.value = v - 1;
+      });
+    }
+    if (plusBtn && editInput) {
+      plusBtn.addEventListener('click', () => {
+        const v = parseInt(editInput.value) || 1;
+        if (v < 50) editInput.value = v + 1;
+      });
+    }
+    // Кнопка "Сохранить изменения"
+    const saveEditBtn = document.getElementById('walkin-save-edit');
+    if (saveEditBtn && editInput) {
+      saveEditBtn.addEventListener('click', () => saveWalkinEdit(b, editInput));
+    }
   } else {
     document.querySelectorAll('[data-status]').forEach(btn => {
       btn.addEventListener('click', () => changeBookingStatus(b, btn.dataset.status));
@@ -1497,8 +1557,6 @@ function openBookingActions(b) {
 }
 
 // Смена статуса — отправка на сервер
-let statusChanging = false;
-
 async function changeBookingStatus(b, newStatus) {
   if (statusChanging) return;
   if (!canEdit()) {
@@ -1537,6 +1595,35 @@ async function changeBookingStatus(b, newStatus) {
     showToast('Нет связи — изменение сохранено локально, отправим при восстановлении', null);
   } finally {
     statusChanging = false;
+  }
+}
+
+// ============================================================================
+// СВОБОДНАЯ ПОСАДКА (walkin) — редактирование существующей
+// ============================================================================
+async function saveWalkinEdit(b, inputEl) {
+  if (!canEdit()) { showToast('В этом ресторане только просмотр', 'error'); return; }
+  const newGuests = parseInt(inputEl.value);
+  if (!newGuests || newGuests < 1 || newGuests > 50) {
+    showToast('Укажи количество гостей (1–50)', 'error');
+    return;
+  }
+  if (newGuests === b.guests) {
+    closeOverlays();
+    return;
+  }
+  b.guests = newGuests;
+  b.updatedAt = new Date().toISOString();
+
+  closeOverlays();
+  renderAll();
+
+  try {
+    await API.saveWalkin(b);
+    showToast('Количество гостей обновлено: ' + newGuests, 'success');
+  } catch (e) {
+    API.addToPendingQueue('saveWalkin', { walkin: b });
+    showToast('Нет связи — изменение сохранено локально', null);
   }
 }
 
@@ -1640,8 +1727,6 @@ function renderWalkinTables() {
 }
 
 // Сохранение walkin
-let walkinSaving = false;  // защита от двойного нажатия
-
 document.getElementById('walkin-save').addEventListener('click', async () => {
   if (walkinSaving) return;  // уже идёт сохранение
   if (!canEdit()) {
