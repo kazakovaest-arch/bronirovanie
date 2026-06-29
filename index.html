@@ -452,6 +452,9 @@
   .order-actions button.success { background: #15803d; color: white; border-color: #15803d; }
   .order-actions button.danger { color: var(--danger); border-color: #fecaca; }
   .order-actions button.danger:hover { background: #fee2e2; }
+  .order-actions button.fee-on { background: #f59e0b; color: white; border-color: #f59e0b; }
+  .order-actions button.fee-on:hover { background: #d97706; }
+  .fee-badge { display:inline-block; background:#f59e0b; color:white; font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; margin-left:6px; vertical-align:middle; }
   .orders-empty {
     text-align: center; padding: 50px 20px;
     color: var(--ink-soft); font-size: 14px;
@@ -1225,6 +1228,9 @@ const API = {
   async updateOrderStatus(id, status, manager) {
     return this.post('updateOrderStatus', { id, status, manager });
   },
+  async updateOrderFee(id, deliveryFee, totalPrice) {
+    return this.post('updateOrderFee', { id, deliveryFee, totalPrice });
+  },
 
   setConnState(state, error) {
     this.lastConnState = state;
@@ -1922,18 +1928,37 @@ function renderOrderCard(o) {
 
   // Действия в зависимости от статуса
   let actions = '';
+  // Надбавка за доставку: показываем тоггл если заказ активный и сумма < 3000
+  const DELIVERY_FEE_AMOUNT = 300;
+  const MIN_FREE = 3000;
+  const basePrice = parseFloat(o.totalPrice) || 0;
+  const hasFee = (o.deliveryFee || 0) >= DELIVERY_FEE_AMOUNT;
+  // originalPrice — сумма без надбавки (если надбавка уже добавлена — вычтем)
+  const originalPrice = hasFee ? basePrice - DELIVERY_FEE_AMOUNT : basePrice;
+  const showFeeBtn = ['new', 'accepted', 'delivering'].includes(o.status) && originalPrice < MIN_FREE;
+  let feeBtn = '';
+  if (showFeeBtn) {
+    if (hasFee) {
+      feeBtn = '<button class="fee-on" data-act="fee-remove" data-id="' + escapeHtml(o.id) + '" title="Надбавка за доставку добавлена. Нажми чтобы убрать">🚚 −300 ₽</button>';
+    } else {
+      feeBtn = '<button data-act="fee-add" data-id="' + escapeHtml(o.id) + '" title="Добавить надбавку за доставку 300 ₽">🚚 +300 ₽</button>';
+    }
+  }
+
   if (o.status === 'new') {
     actions =
       '<button class="primary" data-act="accept" data-id="' + escapeHtml(o.id) + '">✓ Принять</button>' +
       '<button data-act="copy-addr" data-id="' + escapeHtml(o.id) + '">📋 Скопировать адрес</button>' +
+      feeBtn +
       '<button class="danger" data-act="cancel" data-id="' + escapeHtml(o.id) + '">Отменить</button>';
   } else if (o.status === 'accepted') {
     actions =
       '<button class="warning" data-act="delivering" data-id="' + escapeHtml(o.id) + '">🚗 В доставку</button>' +
       '<button data-act="copy-addr" data-id="' + escapeHtml(o.id) + '">📋 Скопировать адрес</button>' +
+      feeBtn +
       '<button class="danger" data-act="cancel" data-id="' + escapeHtml(o.id) + '">Отменить</button>';
   } else if (o.status === 'delivering') {
-    actions = '<button class="success" data-act="delivered" data-id="' + escapeHtml(o.id) + '">✅ Доставлен</button>';
+    actions = '<button class="success" data-act="delivered" data-id="' + escapeHtml(o.id) + '">✅ Доставлен</button>' + feeBtn;
   } else if (o.status === 'delivered' || o.status === 'cancelled') {
     actions = '<span style="color:var(--ink-soft);font-size:12px;">Заказ завершён</span>';
   }
@@ -1942,7 +1967,9 @@ function renderOrderCard(o) {
     '<div class="order-row1">' +
       '<span class="order-time">' + timeStr + '</span>' +
       '<span class="order-status ' + o.status + '">' + (STATUS_LABEL[o.status] || o.status) + '</span>' +
-      '<span class="order-price">' + (parseFloat(o.totalPrice) || 0).toLocaleString('ru-RU') + ' ₽</span>' +
+      '<span class="order-price">' + (parseFloat(o.totalPrice) || 0).toLocaleString('ru-RU') + ' ₽' +
+        ((o.deliveryFee || 0) >= 300 ? '<span class="fee-badge">+300 доставка</span>' : '') +
+      '</span>' +
     '</div>' +
     '<div class="order-name">' + escapeHtml(o.customerName || 'без имени') + '</div>' +
     '<div class="order-meta">' +
@@ -1976,6 +2003,45 @@ async function changeOrderStatus(id, newStatus) {
     order.status = oldStatus;
     render();
     alert('Ошибка сохранения: ' + (e.message || e));
+  }
+}
+
+// Надбавка за доставку — тоггл +300 / −300
+async function toggleDeliveryFee(id, add) {
+  const order = STATE.orders.find(o => o.id === id);
+  if (!order) return;
+
+  const DELIVERY_FEE_AMOUNT = 300;
+  const oldFee = parseFloat(order.deliveryFee) || 0;
+  const oldTotal = parseFloat(order.totalPrice) || 0;
+
+  let newFee, newTotal;
+  if (add) {
+    // Добавляем надбавку (только если ещё не добавлена)
+    if (oldFee >= DELIVERY_FEE_AMOUNT) return;
+    newFee = DELIVERY_FEE_AMOUNT;
+    newTotal = oldTotal + DELIVERY_FEE_AMOUNT;
+  } else {
+    // Убираем надбавку
+    if (oldFee < DELIVERY_FEE_AMOUNT) return;
+    newFee = 0;
+    newTotal = oldTotal - DELIVERY_FEE_AMOUNT;
+  }
+
+  // Оптимистично обновляем локально
+  order.deliveryFee = newFee;
+  order.totalPrice = newTotal;
+  order.updatedAt = new Date().toISOString();
+  renderOrders();
+
+  try {
+    await API.updateOrderFee(id, newFee, newTotal);
+  } catch (e) {
+    // Откат при ошибке
+    order.deliveryFee = oldFee;
+    order.totalPrice = oldTotal;
+    renderOrders();
+    alert('Ошибка сохранения надбавки: ' + (e.message || e));
   }
 }
 
@@ -3720,6 +3786,8 @@ document.addEventListener('click', e => {
   else if (act === 'delivered') changeOrderStatus(id, 'delivered');
   else if (act === 'cancel') changeOrderStatus(id, 'cancelled');
   else if (act === 'copy-addr') copyOrderAddress(id);
+  else if (act === 'fee-add') toggleDeliveryFee(id, true);
+  else if (act === 'fee-remove') toggleDeliveryFee(id, false);
 });
 
 // Раскрытие / скрытие завершённых заказов
